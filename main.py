@@ -1,11 +1,16 @@
 import pandas as pd
 import wandb
+import os
 from opt import config_parser
 from model import prompt_model
 from utils import load_data_from_huggingface, get_run_name
 from data.prompt_dataset import prompt_dataset
 from datasets import load_dataset, concatenate_datasets, Dataset, DatasetDict
 from transformers import DataCollatorForSeq2Seq
+
+
+# === Wandb login === 
+os.environ['WANDB_API_KEY'] = 'b25e215e9095409f3f4a9fed480fd4c2362c8f5c'
 
 
 # === Model ===

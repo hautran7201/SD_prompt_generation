@@ -1,8 +1,11 @@
 __pycache__
 
+.ipynb_checkpoints
 /.ipynb_checkpoints
 /check_point/* 
 /data/*
 /wandb/*
+!/data/prompt_dataset.py
+
 
 .gitignore
