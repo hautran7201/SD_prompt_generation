@@ -10,7 +10,7 @@ from transformers import DataCollatorForSeq2Seq
 
 
 # === Wandb login === 
-os.environ['WANDB_API_KEY'] = 'b25e215e9095409f3f4a9fed480fd4c2362c8f5c'
+os.environ['WANDB_API_KEY'] = 'token'
 
 
 # === Model ===
@@ -22,7 +22,7 @@ data_collator = DataCollatorForSeq2Seq(tokenizer, model=model)
 
 # === sd dataset ====
 sd_huggingface_path = 'MadVoyager/stable_diffusion_instructional_dataset'
-sd_path = r'/content/drive/MyDrive/project/prompt_generation/data/sd_dataset'
+sd_path = r'data/sd_dataset'
 
 sd_dataset = load_data_from_huggingface(
     loading_path=sd_huggingface_path,
@@ -39,7 +39,7 @@ sd_dataset = sd_dataset.remove_columns(['SOURCE'])
 
 # === mj dataset ===
 mj_huggingface_path = 'digitalwas-solutions/midjourney-prompts'
-mj_path = r'/content/drive/MyDrive/project/prompt_generation/data/mj_dataset'
+mj_path = r'data/mj_dataset'
 
 mj_dataset = load_data_from_huggingface(
     loading_path=mj_huggingface_path,
