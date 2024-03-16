@@ -14,7 +14,8 @@ Install library
 ```bash
   pip install -r requirements.txt
 ```
-    ## Running code
+
+## Running code
 Train model
 ```bash
     config_path = 'config/test.yaml'
