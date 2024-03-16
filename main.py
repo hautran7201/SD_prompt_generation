@@ -1,122 +1,170 @@
 import pandas as pd
-import wandb
 import os
+from omegaconf import OmegaConf
+from transformers.utils.dummy_pt_objects import RobertaForSequenceClassification
 from opt import config_parser
 from model import prompt_model
-from utils import load_data_from_huggingface, get_run_name
+from utils import load_prompt_data, get_run_name
 from data.prompt_dataset import prompt_dataset
 from datasets import load_dataset, concatenate_datasets, Dataset, DatasetDict
 from transformers import DataCollatorForSeq2Seq
+from torch.utils.data import DataLoader
 
 
-# === Wandb login === 
-os.environ['WANDB_API_KEY'] = 'token'
+def train(config):
+    # === Model ===
+    model_path = config.model.model_path
+    model = prompt_model(model_path)
+    tokenizer = model.tokenizer
+    data_collator = DataCollatorForSeq2Seq(tokenizer, model=model)
+
+    # === Load data ===
+    datasets = []
+    for data_config in config.data.datasets:
+        dataset = load_prompt_data(
+            loading_path=data_config.data_path,
+            instruction_column_name=data_config.instruction_column,
+            prompt_column_name=data_config.prompt_column,
+            saving_path=data_config.saving_path,
+            load_data_disk=data_config.load_from_disk
+        )
+        datasets.append(dataset)
+
+    # === Concat dataset ===
+    train_dataset = concatenate_datasets([dataset['train'] for dataset in datasets])
+    eval_dataset = concatenate_datasets([dataset['validation'] for dataset in datasets])
 
 
-# === Model ===
-model_path = 'merve/chatgpt-prompt-generator-v12'
-model = prompt_model(model_path)
-tokenizer = model.tokenizer
-data_collator = DataCollatorForSeq2Seq(tokenizer, model=model)
+    # === Create dataset ===
+    dataset = prompt_dataset(
+        train_dataset = train_dataset,
+        eval_dataset = eval_dataset,
+        pad_token_id = model.pad_token_id,
+        decoder_start_token_id = model.decoder_start_token_id,
+        tokenizer = tokenizer,
+        data_collator = data_collator
+    )
 
+    # === Data loader ===
+    train_dataloader, eval_dataloader = dataset.get_train_test_split(config.model.batch_size)
 
-# === sd dataset ====
-sd_huggingface_path = 'MadVoyager/stable_diffusion_instructional_dataset'
-sd_path = r'data/sd_dataset'
+    
+    # === Wandb ===
+    if config.wandb.token:
+        # === wandb args ===
+        project = config.wandb.project
+        training_group = config.wandb.training_group
+        eval_group = config.wandb.eval_group
 
-sd_dataset = load_data_from_huggingface(
-    loading_path=sd_huggingface_path,
-    saving_path=sd_path
-)
+        # === Import ===
+        import wandb
+        # === Wandb login === 
+        os.environ['WANDB_API_KEY'] = config.wandb.token
+        # === Logs ===
+        training_run_log = wandb.init(project=project, group=training_group, name=get_run_name())
+        eval_run_log = wandb.init(project=project, group=eval_group, name=get_run_name())
+    else:
+        training_run_log = None
+        eval_run_log = None
 
-# select and rename columns
-sd_dataset = sd_dataset.rename_column('INSTRUCTION', 'instruction')
-sd_dataset = sd_dataset.rename_column('RESPONSE', 'prompt')
-sd_dataset = sd_dataset['train'].train_test_split(train_size=0.9)
-sd_dataset['validation'] = sd_dataset.pop('test')
-sd_dataset = sd_dataset.remove_columns(['SOURCE'])
+    if config.huggingface.write_token:
+        os.environ['HF_TOKEN'] = config.huggingface.write_token
 
+    model.training(
+        epochs            = config.model.epochs,
+        train_dataloader  = train_dataloader, 
+        eval_dataloader   = eval_dataloader, 
+        num_warmup_steps  = config.model.num_warmup_steps,
+        lr                = config.model.learning_rate,
+        training_run_log  = training_run_log,
+        eval_run_log      = eval_run_log,
+        out_dir           = config.model.model_out_dir,
+        hub_id            = config.huggingface.hub_id
+    )
 
-# === mj dataset ===
-mj_huggingface_path = 'digitalwas-solutions/midjourney-prompts'
-mj_path = r'data/mj_dataset'
+    return model
 
-mj_dataset = load_data_from_huggingface(
-    loading_path=mj_huggingface_path,
-    saving_path=mj_path
-)
+def evaluation(config):
+    # === Model ===
+    model_path = config.model.model_path
+    model = prompt_model(model_path)
+    tokenizer = model.tokenizer
+    data_collator = DataCollatorForSeq2Seq(tokenizer, model=model)
 
-# select and rename columns
-mj_dataset = mj_dataset.rename_column('autotrain_text', 'instruction')
-mj_dataset = mj_dataset.rename_column('Prompt', 'prompt')
-train_df_mj_dataset = pd.DataFrame(mj_dataset['train'])
-test_df_mj_dataset = pd.DataFrame(mj_dataset['validation'])
+    # === Load data ===
+    datasets = []
+    for data_config in config.data.datasets:
+        dataset = load_prompt_data(
+            loading_path=data_config.data_path,
+            instruction_column_name=data_config.instruction_column,
+            prompt_column_name=data_config.prompt_column,
+            saving_path=data_config.saving_path,
+            load_data_disk=data_config.load_from_disk
+        )
+        datasets.append(dataset)
 
-# dropna row
-train_df_mj_dataset = train_df_mj_dataset.dropna()
-test_df_mj_dataset = train_df_mj_dataset.dropna()
+    # === Concat dataset ===
+    test_dataset = concatenate_datasets([dataset['test'] for dataset in datasets])
 
-train_mj_dataset = Dataset.from_pandas(train_df_mj_dataset)
-test_mj_dataset = Dataset.from_pandas(test_df_mj_dataset)
+    # === Data loader
+    test_dataloader = DataLoader(
+        test_dataset,
+        batch_size=config.model.batch_size,
+        shuffle=True
+    )
 
-mj_dataset = DatasetDict(
-    {
-        'train': train_mj_dataset,
-        'validation': test_mj_dataset
-    }
-)
+    # === Wandb ===
+    if config.wandb.token:
+        # === wandb args ===
+        project = config.wandb.project
+        training_group = config.wandb.training_group
+        eval_group = config.wandb.eval_group
 
+        # === Import ===
+        import wandb
+        # === Wandb login === 
+        os.environ['WANDB_API_KEY'] = config.wandb.token
+        # === Logs ===
+        eval_run_log = wandb.init(project=project, group=eval_group, name=get_run_name())
+    else:
+        eval_run_log = None
 
-# === Concat dataset ===
-train_dataset = concatenate_datasets([sd_dataset['train'], mj_dataset['train']])
-eval_dataset = concatenate_datasets([sd_dataset['validation'], mj_dataset['validation']])
+    # === Evaluation ===
+    result = model.evaluation(
+        eval_dataloader=test_dataloader,
+        eval_run_log=eval_run_log
+    )
 
+    return RobertaForSequenceClassification
 
-# === Create dataset ===
-dataset = prompt_dataset(
-    train_dataset = train_dataset,
-    eval_dataset = eval_dataset,
-    pad_token_id = model.pad_token_id,
-    decoder_start_token_id = model.decoder_start_token_id,
-    tokenizer = tokenizer,
-    data_collator = data_collator
-)
+def inference(config, data):
+    # === Model ===
+    model_path = config.model.model_path
+    model = prompt_model(model_path)
+    tokenizer = model.tokenizer
+    data_collator = DataCollatorForSeq2Seq(tokenizer, model=model)
 
-train_dataloader, eval_dataloader = dataset.get_train_test_split(batch_size=8)
+    # === Inference ===
+    result = model.inference(data)
 
+    return result
 
 if __name__ == '__main__':
     # Config
-    args = config_parser()
-
-    project = 'prompt-generator-t5'
-    training_group = 'training_group'
-    eval_group = 'eval_group'
-    training_run_log = wandb.init(project=project, group=training_group, name=get_run_name())
-    eval_run_log = wandb.init(project=project, group=eval_group, name=get_run_name())
+    args = config_parser()    
+    config = OmegaConf.load(args.config)
 
     # === Training ===
     if args.train_only:
-        model.training(
-            epochs            = args.epochs,
-            train_dataloader  = train_dataloader, 
-            eval_dataloader   = eval_dataloader, 
-            num_warmup_steps  = args.num_warmup_steps,
-            lr                = args.learning_rate,
-            training_run_log  = training_run_log,
-            eval_run_log      = eval_run_log,
-            out_dir           = args.model_out_dir
-        )
+        train(config)
 
-    # === Eval ===
+    # === Evaluation ===
     if args.eval_only:
-        model.evaluate(
-            eval_dataloader = eval_dataloader,
-            eval_run_log    = eval_run_log
-        )
+        result = evaluation(config)
+        print(result)
 
-    # === Infer ===
+    # === Inference ===
+    data = {'instruction': args.infer_data}
     if args.infer_only:
-        model.inference_model(
-            [args.infer_data]
-        )
+        result = inference(config, data)
+        print(result)

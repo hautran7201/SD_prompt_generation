@@ -1,0 +1,40 @@
+checkpoint:
+    name: first_trial
+
+
+huggingface:
+    read_token: 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
+    write_token: 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
+    hub_id: Bart_seq2seq_prompt_generation
+
+
+model:
+    model_path: merve/chatgpt-prompt-generator-v12
+    batch_size: 2
+    epochs: 1
+    learning_rate: 4e-3
+    num_warmup_steps: 0
+    model_out_dir: ./check_point/${checkpoint.name}
+
+
+data:
+    datasets:
+      - data_path: MadVoyager/stable_diffusion_instructional_dataset # data/sd_dataset
+        saving_path: data/sd_dataset
+        instruction_column: INSTRUCTION
+        prompt_column: RESPONSE
+        load_from_disk: false
+
+      - data_path: digitalwas-solutions/midjourney-prompts # data/mj_dataset
+        saving_path: data/mj_dataset
+        instruction_column: autotrain_text
+        prompt_column: Prompt
+        load_from_disk: false
+
+
+wandb:
+    token:
+
+    project: prompt-generator-t5
+    training_group: training_group
+    eval_group: eval_group

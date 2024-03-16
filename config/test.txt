@@ -1,6 +1,0 @@
-# === parameters ===
-batch_size        = 8
-epochs            = 1
-learning_rate     = 4e-3
-num_warmup_steps  = 0
-model_out_dir     = ./check_point/

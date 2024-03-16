@@ -38,22 +38,19 @@ class prompt_dataset:
         input_encoding = self.tokenizer.batch_encode_plus(example['instruction'], padding='max_length', max_length=128, truncation=True)
         target_encoding = self.tokenizer.batch_encode_plus(example['prompt'], padding='max_length', max_length=128, truncation=True)
 
-        labels = torch.Tensor(target_encoding['input_ids'])
+        labels = torch.Tensor(target_encoding['input_ids']).long()
         decode_input_ids = shift_tokens_right(
             labels,
             pad_token_id=self.pad_token_id,
-            decoder_start_token_id=self.decoder_start_token_id)
+            decoder_start_token_id=self.decoder_start_token_id).long()
 
         labels[labels[:, :] == self.pad_token_id] == -100
-
         input_ids = torch.tensor(input_encoding['input_ids']).long()
-        labels = torch.tensor(labels).long()
-        decoder_input_ids = torch.tensor(decode_input_ids).long()
 
         encodings = {
             'input_ids': input_ids,
             'attention_mask': input_encoding['attention_mask'],
-            'decoder_input_ids': decoder_input_ids,
+            'decoder_input_ids': decode_input_ids,
             'labels': labels
         }
 

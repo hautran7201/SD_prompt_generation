@@ -1,8 +1,10 @@
-import wandb
 import torch
 import numpy as np
 import evaluate
-from utils import get_run_name
+import os
+import json
+
+from utils import get_run_name, save_to_json
 from transformers import get_scheduler
 from tqdm.auto import tqdm
 from torch.optim import AdamW
@@ -23,9 +25,9 @@ class prompt_model:
         self.tokenizer = BartTokenizer.from_pretrained(model_path, return_tensors='pt')        
 
         # Metric
-        self.metric  = evaluate.load('sacrebleu', 'rouge', trust_remote_code=True)
+        self.metric  = evaluate.load('sacrebleu', trust_remote_code=True)
         self.sacrebleu_metric = evaluate.load('sacrebleu', trust_remote_code=True)
-        self.rouge_metric = evaluate.load('rouge', trust_remote_code=True)
+        # self.rouge_metric = evaluate.load('rouge', trust_remote_code=True)
 
         # special token id 
         self.pad_token_id = model.config.pad_token_id
@@ -40,7 +42,8 @@ class prompt_model:
         lr=2e-5,
         training_run_log=None,
         eval_run_log=None,
-        out_dir=None
+        out_dir=None,
+        hub_id=''
     ):
         # Data
         train_dataloader, eval_dataloader, optimizer= self.accelerator.prepare(
@@ -81,19 +84,29 @@ class prompt_model:
                         }
                     )
 
+            # Evaluation
             result = self.evaluate(
                 eval_dataloader,
                 eval_run_log=eval_run_log
             )
-
             print(f"epoch {epoch}, BLEU score: {result['score']:.2f}")
 
+            # Save to disk 
             if out_dir:
                 self.accelerator.wait_for_everyone()
                 unwarped_model = self.accelerator.unwrap_model(self.model)
                 unwarped_model.save_pretrained(out_dir, save_function=self.accelerator.save)
                 if self.accelerator.is_main_process:
                     self.tokenizer.save_pretrained(out_dir)
+                
+                save_to_json(result, os.path.join(out_dir, 'log'))
+
+            # Push to huggingface
+            if hub_id:
+                self.accelerator.wait_for_everyone()
+                # Save model
+                unwarped_model = self.accelerator.unwrap_model(self.model)
+                unwarped_model.push_to_hub(hub_id)
         
         if training_run_log:
             training_run_log.finish()
@@ -141,14 +154,14 @@ class prompt_model:
 
             self.metric.add_batch(predictions=decode_preds, references=decode_labels)
             sacrebleu_score = self.sacrebleu_metric.compute(predictions=decode_preds, references=decode_labels)
-            rouge_score = self.rouge_metric.compute(predictions=decode_preds, references=decode_labels)
+            # rouge_score = self.rouge_metric.compute(predictions=decode_preds, references=decode_labels)
 
             if eval_run_log:
                 eval_run_log.log(
                     {
                         'blue_score': sacrebleu_score['score'],
-                        'rouge1_precision': rouge_score['rouge1'].mid.precision,
-                        'rouge2_recall':rouge_score['rouge1'].mid.recall,
+                        # 'rouge1_precision': rouge_score['rouge1'].mid.precision,
+                        # 'rouge2_recall':rouge_score['rouge1'].mid.recall,
                     }
                 )
 
@@ -161,7 +174,7 @@ class prompt_model:
 
         return result
 
-    def inference_model(self, batch):
+    def inference(self, batch):
         batch = Dataset.from_dict(batch)
 
         def convert_to_feature_for_infer(example):
@@ -190,8 +203,9 @@ class prompt_model:
             generated_tokens = self.accelerator.unwrap_model(self.model).generate(
                 torch.Tensor(batch['input_ids']).to(torch.int64).to(self.model.device), # batch['input_ids'], #
                 attention_mask=torch.Tensor(batch['attention_mask']).to(torch.int64).to(self.model.device), # batch['attention_mask'],
-                max_new_tokens=128,
-                num_beams=4
+                max_new_tokens=60,
+                num_beams=2,
+                no_repeat_ngram_size=2
             )
 
         generated_tokens = self.accelerator.pad_across_processes(
