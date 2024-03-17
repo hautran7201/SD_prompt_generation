@@ -1,7 +1,7 @@
 import pandas as pd
 import os
+import torch
 from omegaconf import OmegaConf
-from transformers.utils.dummy_pt_objects import RobertaForSequenceClassification
 from opt import config_parser
 from model import prompt_model
 from utils import load_prompt_data, get_run_name
@@ -135,7 +135,7 @@ def evaluation(config):
         eval_run_log=eval_run_log
     )
 
-    return RobertaForSequenceClassification
+    return result
 
 def inference(config, data):
     # === Model ===
