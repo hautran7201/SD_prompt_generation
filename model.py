@@ -21,7 +21,7 @@ class prompt_model:
         self.accelerator = Accelerator()
 
         # model, optimizer
-        self.model = self.accelerator.prepare(model)
+        self.model = model # self.accelerator.prepare(model)
         self.tokenizer = BartTokenizer.from_pretrained(model_path, return_tensors='pt')        
 
         # Metric
@@ -46,13 +46,15 @@ class prompt_model:
         hub_id=''
     ):
         # Data
-        train_dataloader, eval_dataloader, optimizer= self.accelerator.prepare(
+        """train_dataloader, eval_dataloader, optimizer= self.accelerator.prepare(
             train_dataloader, 
             eval_dataloader,
             self.accelerator.prepare(
                 AdamW(self.model.parameters(), lr=lr)
             )
-        )
+        )"""
+
+        optimizer = AdamW(self.model.parameters(), lr=lr)
 
         # Learning rate scheduler
         lr_scheduler = get_scheduler(
@@ -68,14 +70,16 @@ class prompt_model:
             
             self.model.train()
             for batch in train_dataloader:
+                optimizer.zero_grad()
                 outputs = self.model(**batch)
                 loss = outputs.loss
-                self.accelerator.backward(loss)
+                # self.accelerator.backward(loss)
+                loss.backward()
 
                 optimizer.step()
                 lr_scheduler.step()
-                optimizer.zero_grad()
-                process_bar.update()
+                # optimizer.zero_grad()
+                process_bar.update(1)
 
                 if training_run_log:
                     training_run_log.log(
@@ -84,29 +88,33 @@ class prompt_model:
                         }
                     )
 
+            # Save to disk 
+            if out_dir:
+                # self.accelerator.wait_for_everyone()
+                # unwarped_model = self.accelerator.unwrap_model(self.model)
+                self.model.cpu().save_pretrained(out_dir) # , save_function=self.accelerator.save
+                self.tokenizer.save_pretrained(out_dir)
+                # if self.accelerator.is_main_process:
+                    # self.tokenizer.save_pretrained(out_dir)
+                
+                save_to_json(result, os.path.join(out_dir, 'log'))
+
+            # Push to huggingface
+            if hub_id:
+                # self.accelerator.wait_for_everyone()
+                # Save model
+                # unwarped_model = self.accelerator.unwrap_model(self.model)
+                # unwarped_model.push_to_hub(hub_id)
+                self.model.cpu().push_to_hub(hub_id)
+
+
             # Evaluation
             result = self.evaluate(
                 eval_dataloader,
                 eval_run_log=eval_run_log
             )
             print(f"epoch {epoch}, BLEU score: {result['score']:.2f}")
-
-            # Save to disk 
-            if out_dir:
-                self.accelerator.wait_for_everyone()
-                unwarped_model = self.accelerator.unwrap_model(self.model)
-                unwarped_model.save_pretrained(out_dir, save_function=self.accelerator.save)
-                if self.accelerator.is_main_process:
-                    self.tokenizer.save_pretrained(out_dir)
-                
-                save_to_json(result, os.path.join(out_dir, 'log'))
-
-            # Push to huggingface
-            if hub_id:
-                self.accelerator.wait_for_everyone()
-                # Save model
-                unwarped_model = self.accelerator.unwrap_model(self.model)
-                unwarped_model.push_to_hub(hub_id)
+            
         
         if training_run_log:
             training_run_log.finish()
