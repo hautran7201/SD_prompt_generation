@@ -84,13 +84,6 @@ class prompt_model:
                         }
                     )
 
-            # Evaluation
-            result = self.evaluate(
-                eval_dataloader,
-                eval_run_log=eval_run_log
-            )
-            print(f"epoch {epoch}, BLEU score: {result['score']:.2f}")
-
             # Save to disk 
             if out_dir:
                 self.accelerator.wait_for_everyone()
@@ -107,6 +100,14 @@ class prompt_model:
                 # Save model
                 unwarped_model = self.accelerator.unwrap_model(self.model)
                 unwarped_model.push_to_hub(hub_id)
+
+
+            # Evaluation
+            result = self.evaluate(
+                eval_dataloader,
+                eval_run_log=eval_run_log
+            )
+            print(f"epoch {epoch}, BLEU score: {result['score']:.2f}")
         
         if training_run_log:
             training_run_log.finish()
