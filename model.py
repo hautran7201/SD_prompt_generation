@@ -92,7 +92,6 @@ class prompt_model:
                 if self.accelerator.is_main_process:
                     self.tokenizer.save_pretrained(out_dir)
                 
-                save_to_json(result, os.path.join(out_dir, 'log'))
 
             # Push to huggingface
             if hub_id:
@@ -107,6 +106,7 @@ class prompt_model:
                 eval_dataloader,
                 eval_run_log=eval_run_log
             )
+            save_to_json(result, os.path.join(out_dir, 'log'))
             print(f"epoch {epoch}, BLEU score: {result['score']:.2f}")
         
         if training_run_log:
